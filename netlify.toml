@@ -1,0 +1,21 @@
+# Root config — tells Netlify to build from the frontend folder
+[build]
+  base = "news-hub-front"
+  command = "npm run build"
+  publish = "news-hub-front/dist"
+  functions = "news-hub-front/netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# API requests → Netlify Function (preserve full path for Express routing)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/api/:splat"
+  status = 200
+
+# SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
