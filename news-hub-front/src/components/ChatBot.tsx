@@ -1,190 +1,163 @@
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Loader2 } from "lucide-react";
-import { sendChatMessage, ConversationMessage } from "@/lib/api";
+import { MessageCircle, X, Send, Loader2, Bot } from "lucide-react";
 
 interface Message {
-  id: number;
+  role: "user" | "assistant";
   text: string;
-  sender: "user" | "bot";
 }
 
-/** Lightweight inline markdown renderer for chat bubbles */
-function MarkdownText({ text }: { text: string }) {
-  function parseLine(line: string): React.ReactNode {
-    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**"))
-        return <strong key={i}>{part.slice(2, -2)}</strong>;
-      if (part.startsWith("*") && part.endsWith("*"))
-        return <em key={i}>{part.slice(1, -1)}</em>;
-      return part;
-    });
-  }
-
-  const lines = text.split("\n");
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-
-    if (/^[-*•]\s+/.test(line)) {
-      const items: React.ReactNode[] = [];
-      while (i < lines.length && /^[-*•]\s+/.test(lines[i])) {
-        items.push(<li key={i}>{parseLine(lines[i].replace(/^[-*•]\s+/, ""))}</li>);
-        i++;
-      }
-      elements.push(<ul key={`ul${i}`} className="list-disc pl-4 my-1 space-y-0.5">{items}</ul>);
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(line)) {
-      const items: React.ReactNode[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-        items.push(<li key={i}>{parseLine(lines[i].replace(/^\d+\.\s+/, ""))}</li>);
-        i++;
-      }
-      elements.push(<ol key={`ol${i}`} className="list-decimal pl-4 my-1 space-y-0.5">{items}</ol>);
-      continue;
-    }
-
-    elements.push(<p key={i}>{parseLine(line)}</p>);
-    i++;
-  }
-
-  return <div className="space-y-1">{elements}</div>;
+interface Props {
+  articleTitle: string;
 }
 
-const ChatBot = ({ articleTitle }: { articleTitle: string }) => {
-  const makeGreeting = (title: string): Message => ({
-    id: 1,
-    text: `Hi! Ask me anything about "${title}".`,
-    sender: "bot",
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+async function askGemini(messages: Message[], articleTitle: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/gemini/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, articleTitle }),
   });
 
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([makeGreeting(articleTitle)]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const data = await res.json();
 
-  // Reset chat when the article changes
+  if (!res.ok) {
+    throw new Error(data.error || "Request failed");
+  }
+
+  return data.reply as string;
+}
+
+export default function ChatBot({ articleTitle }: Props) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Reset when article changes
   useEffect(() => {
-    setMessages([makeGreeting(articleTitle)]);
+    setMessages([]);
     setInput("");
+    setError("");
   }, [articleTitle]);
 
+  // Scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  // Focus input when opened
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+  }, [open]);
 
-    const userText = input.trim();
-    const userMsg: Message = { id: Date.now(), text: userText, sender: "user" };
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
 
-    // Capture history (skip the greeting, keep all real exchanges)
-    const history: ConversationMessage[] = messages
-      .slice(1)
-      .map((m) => ({ role: m.sender === "user" ? "user" : "bot", text: m.text }));
-
-    setMessages((prev) => [...prev, userMsg]);
+    const newMessages: Message[] = [...messages, { role: "user", text }];
+    setMessages(newMessages);
     setInput("");
-    setIsLoading(true);
+    setLoading(true);
+    setError("");
 
     try {
-      const reply = await sendChatMessage(articleTitle, userText, history);
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now() + 1, text: reply, sender: "bot" },
-      ]);
+      const reply = await askGemini(newMessages, articleTitle);
+      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
     } catch (err) {
-      const raw = err instanceof Error ? err.message : "";
-      const text = raw.toLowerCase().includes("gemini_api_key")
-        ? "The AI assistant isn't configured yet. Please add your GEMINI_API_KEY in Netlify → Site settings → Environment variables, then redeploy."
-        : raw || "Sorry, I couldn't get a response. Please try again.";
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now() + 1, text, sender: "bot" },
-      ]);
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  };
+  }
 
   return (
     <>
-      {/* Floating button */}
+      {/* Toggle button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-110"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Close chat" : "Open article assistant"}
+        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl shadow-primary/30 transition-transform duration-200 hover:scale-110"
       >
-        {isOpen ? <X size={24} /> : <MessageCircle size={24} />}
+        {open ? <X size={22} /> : <MessageCircle size={22} />}
       </button>
 
-      {/* Chat panel */}
-      {isOpen && (
-        <div className="fixed bottom-24 right-6 z-50 flex h-[460px] w-[340px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+      {/* Chat window */}
+      {open && (
+        <div className="fixed bottom-24 right-6 z-50 flex w-[340px] flex-col rounded-2xl border border-border bg-card shadow-2xl"
+          style={{ height: "460px" }}>
+
           {/* Header */}
-          <div className="flex items-center gap-2 bg-primary px-4 py-3">
-            <MessageCircle size={18} className="text-primary-foreground" />
-            <span className="text-sm font-semibold text-primary-foreground">Article Assistant</span>
+          <div className="flex items-center gap-2.5 rounded-t-2xl bg-primary px-4 py-3">
+            <Bot size={18} className="text-primary-foreground" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-primary-foreground">Article Assistant</p>
+              <p className="text-[10px] text-primary-foreground/70 truncate max-w-[220px]">{articleTitle}</p>
+            </div>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                    msg.sender === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
-                  }`}
-                >
-                  {msg.sender === "bot" ? (
-                    <MarkdownText text={msg.text} />
-                  ) : (
-                    msg.text
-                  )}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.length === 0 && !loading && (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <Bot size={32} className="text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">Ask me anything about this article.</p>
+              </div>
+            )}
+
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap
+                  ${msg.role === "user"
+                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                    : "bg-muted text-foreground rounded-bl-sm"}`}>
+                  {msg.text}
                 </div>
               </div>
             ))}
-            {isLoading && (
+
+            {loading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
-                  <Loader2 size={14} className="animate-spin" />
+                <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2.5 text-sm text-muted-foreground">
+                  <Loader2 size={13} className="animate-spin" />
                   Thinking…
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+
+            {error && (
+              <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {error}
+              </div>
+            )}
+
+            <div ref={bottomRef} />
           </div>
 
           {/* Input */}
           <div className="flex items-center gap-2 border-t border-border p-3">
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
               placeholder="Ask about this article…"
-              disabled={isLoading}
-              className="flex-1 rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
+              disabled={loading}
+              className="flex-1 rounded-xl bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
             />
             <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="text-primary hover:text-primary/80 transition-colors disabled:opacity-40"
+              onClick={send}
+              disabled={loading || !input.trim()}
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
             >
-              <Send size={18} />
+              <Send size={15} />
             </button>
           </div>
         </div>
       )}
     </>
   );
-};
-
-export default ChatBot;
+}

@@ -1,3 +1,4 @@
+import ChatBot from "@/components/ChatBot";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTopHeadlines, getCategoryColor } from "@/lib/api";
@@ -21,7 +22,6 @@ import {
   Mail,
   MessageSquare,
 } from "lucide-react";
-import ChatBot from "@/components/ChatBot";
 import NewsCard from "@/components/NewsCard";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
