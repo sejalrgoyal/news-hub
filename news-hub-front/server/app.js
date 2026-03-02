@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import newsRoutes from './routes/news.js';
-import geminiRoutes from './routes/gemini.js';
+import newsRoutesModule from './routes/news.js';
+import geminiRoutesModule from './routes/gemini.js';
+
+// Unwrap default export — Netlify bundling can wrap ESM defaults as { default: router }
+const newsRoutes = newsRoutesModule?.default ?? newsRoutesModule;
+const geminiRoutes = geminiRoutesModule?.default ?? geminiRoutesModule;
 
 const app = express();
 
