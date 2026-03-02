@@ -112,7 +112,16 @@ export async function sendChatMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt }),
   });
-  if (!res.ok) throw new Error("Failed to get AI response");
+
+  if (!res.ok) {
+    let serverMsg = "Failed to get AI response";
+    try {
+      const errData = await res.json();
+      if (errData.error) serverMsg = errData.error;
+    } catch { /* ignore parse errors */ }
+    throw new Error(serverMsg);
+  }
+
   const data = await res.json();
   return (data.reply as string) || "Sorry, I could not generate a response.";
 }

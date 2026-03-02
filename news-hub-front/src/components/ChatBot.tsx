@@ -100,14 +100,14 @@ const ChatBot = ({ articleTitle }: { articleTitle: string }) => {
         ...prev,
         { id: Date.now() + 1, text: reply, sender: "bot" },
       ]);
-    } catch {
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "";
+      const text = raw.toLowerCase().includes("gemini_api_key")
+        ? "The AI assistant isn't configured yet. Please add your GEMINI_API_KEY in Netlify → Site settings → Environment variables, then redeploy."
+        : raw || "Sorry, I couldn't get a response. Please try again.";
       setMessages((prev) => [
         ...prev,
-        {
-          id: Date.now() + 1,
-          text: "Sorry, I couldn't get a response. Please try again.",
-          sender: "bot",
-        },
+        { id: Date.now() + 1, text, sender: "bot" },
       ]);
     } finally {
       setIsLoading(false);
