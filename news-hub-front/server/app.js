@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import newsRoutesModule from './routes/news.js';
+import geminiRoutesModule from './routes/gemini.js';
 
 const newsRoutes = newsRoutesModule?.default ?? newsRoutesModule;
+const geminiRoutes = geminiRoutesModule?.default ?? geminiRoutesModule;
 
 const app = express();
 
@@ -23,6 +25,7 @@ app.use(
 app.use(express.json());
 
 app.use('/api/news', newsRoutes);
+app.use('/api/gemini', geminiRoutes);
 
 app.get('/', (req, res) => {
   res.json({
