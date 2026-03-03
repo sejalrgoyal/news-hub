@@ -10,5 +10,5 @@ services:
         value: "20"
       - key: NEWS_API_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: GROQ_API_KEY
         sync: false

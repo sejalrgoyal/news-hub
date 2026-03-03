@@ -2,40 +2,42 @@ import express from 'express';
 
 const router = express.Router();
 
-// Call Gemini REST API directly — no SDK, no version conflicts
-async function callGemini(prompt) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+// Groq — free tier, OpenAI-compatible, no billing required
+// Models: llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+async function callGroq(messages) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
 
-  const res = await fetch(url, {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+      model: GROQ_MODEL,
+      messages,
+      max_tokens: 512,
+      temperature: 0.7,
     }),
   });
 
   const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.error?.message || `Gemini API error (${res.status})`);
-  }
-
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
+  if (!res.ok) throw new Error(data.error?.message || `Groq API error (${res.status})`);
+  return data.choices?.[0]?.message?.content || 'No response generated.';
 }
 
 /** GET /api/gemini/health */
 router.get('/health', (_req, res) => {
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ ok: false, error: 'GEMINI_API_KEY is not set' });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(503).json({ ok: false, error: 'GROQ_API_KEY is not set' });
   }
-  res.json({ ok: true, model: 'gemini-2.0-flash' });
+  res.json({ ok: true, provider: 'Groq', model: GROQ_MODEL });
 });
 
-/** POST /api/gemini/chat  —  body: { messages: [{role, text}], articleTitle } */
+/** POST /api/gemini/chat — body: { messages: [{role, text}], articleTitle } */
 router.post('/chat', async (req, res) => {
   try {
     const { messages = [], articleTitle = '' } = req.body;
@@ -44,27 +46,22 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'messages array is required' });
     }
 
-    // Build conversation history (all turns except the last user message)
-    const history = messages
-      .slice(0, -1)
-      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
-      .join('\n');
+    // System prompt + full conversation history in OpenAI format
+    const groqMessages = [
+      {
+        role: 'system',
+        content: `You are a helpful assistant for a news article titled: "${articleTitle}". Give clear, concise answers in 2-3 sentences. Stay relevant to the article topic.`,
+      },
+      ...messages.map((m) => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      })),
+    ];
 
-    const latest = messages[messages.length - 1].text;
-
-    const prompt = [
-      `You are a helpful assistant for a news article titled: "${articleTitle}".`,
-      `Give clear, concise answers in 2-3 sentences. Stay relevant to the article.`,
-      history ? `\nConversation so far:\n${history}` : '',
-      `\nUser: ${latest}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const reply = await callGemini(prompt);
+    const reply = await callGroq(groqMessages);
     res.json({ reply });
   } catch (err) {
-    console.error('Gemini error:', err.message);
+    console.error('AI error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
